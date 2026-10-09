@@ -1,0 +1,120 @@
+---
+title: "Biodiversidade em paisagens"
+author: "Exemplo didático • dados simulados"
+format:
+  dashboard:
+    theme: cosmo
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: preparar-dados
+#| include: false
+library(ggplot2)
+
+# A mesma semente produz os mesmos dados a cada renderização.
+set.seed(42)
+dados <- expand.grid(sitio = 1:20, ano = 2018:2025)
+dados$habitat <- ifelse(dados$sitio <= 10, "Floresta", "Fragmento")
+dados$riqueza <- rpois(nrow(dados), lambda =
+  ifelse(dados$habitat == "Floresta", 32, 22) +
+  (dados$ano - 2018) * ifelse(dados$habitat == "Floresta", 0.4, -0.5))
+
+# Para usar um CSV, substitua a simulação acima por:
+# dados <- read.csv("dados.csv")
+# Colunas esperadas: sitio, ano, habitat, riqueza.
+
+media_anual <- aggregate(riqueza ~ ano + habitat, dados, mean)
+media_habitat <- aggregate(riqueza ~ habitat, dados, mean)
+cores <- c("Floresta" = "#24746B", "Fragmento" = "#CC793F")
+theme_set(theme_minimal(base_size = 13))
+```
+
+# Visão geral
+
+## Row {height=20%}
+
+```{r}
+#| content: valuebox
+#| title: "Sítios amostrados"
+#| icon: geo-alt
+#| color: primary
+list(value = length(unique(dados$sitio)))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Anos de acompanhamento"
+#| icon: calendar3
+#| color: info
+list(value = length(unique(dados$ano)))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Riqueza média por sítio e ano"
+#| icon: tree
+#| color: success
+list(value = format(round(mean(dados$riqueza), 1), decimal.mark = ","))
+```
+
+## Row {height=65%}
+
+```{r}
+#| title: "Trajetória da riqueza média"
+ggplot(media_anual, aes(ano, riqueza, colour = habitat)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = cores) +
+  scale_x_continuous(breaks = 2018:2025) +
+  labs(x = "Ano", y = "Riqueza média", colour = "Habitat") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| title: "Variação entre observações"
+ggplot(dados, aes(habitat, riqueza, fill = habitat)) +
+  geom_boxplot(width = 0.5, alpha = 0.8) +
+  scale_fill_manual(values = cores) +
+  labs(x = NULL, y = "Riqueza por sítio e ano") +
+  theme(legend.position = "none")
+```
+
+## Row {height=15%}
+
+::: {.card}
+**Dados simulados para aprender Quarto.** São 20 sítios acompanhados por oito anos.
+Cada observação representa a riqueza registrada em um sítio em um ano.
+As diferenças entre habitats foram impostas na simulação e não representam evidência empírica.
+:::
+
+# Como funciona
+
+## Row
+
+::: {.card title="1. O arquivo fonte"}
+O arquivo **index.qmd** reúne configurações, texto e código em R.
+O cabeçalho YAML define título e formato. Os blocos de código preparam os dados
+e criam os gráficos. O código é executado durante a renderização.
+
+Abra o arquivo no RStudio para consultar os comentários e modificar o exemplo.
+:::
+
+::: {.card title="2. A organização da página"}
+Um título com **#** cria uma página, como “Visão geral” e “Como funciona”.
+Um título com **## Row** cria uma linha. Gráficos nessa linha aparecem lado a lado.
+O atributo **height** controla a proporção da altura.
+
+Os blocos com **content: valuebox** criam os indicadores no topo.
+:::
+
+::: {.card title="3. O resultado publicado"}
+O comando **quarto render** executa o R e gera **docs/index.html** e seus recursos.
+O GitHub Pages serve essa pasta como um site.
+
+Para atualizar os resultados, altere o código ou os dados, renderize novamente
+e envie a pasta **docs** atualizada ao GitHub.
+:::
