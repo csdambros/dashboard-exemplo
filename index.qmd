@@ -96,6 +96,172 @@ Inputs.table([{
 }])
 ```
 
+# Mapa
+
+```{ojs}
+//| output: false
+// Arquivos locais: copiados pelo Quarto para a publicação.
+geoBrasil = FileAttachment("br.json").json()
+dadosEstados = FileAttachment("dados_estados.csv").csv({typed: true})
+
+// O evento input do mapa torna a UF uma entrada reativa do OJS.
+dadosUF = dadosEstados.filter(d => d.uf === ufSelecionada && d.especie === especie)
+resumoUF = {
+  const xs = dadosUF.map(d => d.tamanho);
+  const n = xs.length;
+  const media = xs.reduce((s, x) => s + x, 0) / n;
+  const dp = Math.sqrt(xs.reduce((s, x) => s + (x - media) ** 2, 0) / (n - 1));
+  return {n, media, dp};
+}
+nomeUF = geoBrasil.features.find(f => f.properties.id === "BR" + ufSelecionada).properties.name
+
+dominioUF = {
+  const xs = dadosEstados.map(d => d.tamanho);
+  const minimo = Math.min(...xs), maximo = Math.max(...xs);
+  const margem = (maximo - minimo) * 0.15;
+  return [minimo - margem, maximo + margem];
+}
+curvaUF = {
+  const h = Math.max(1.06 * resumoUF.dp * resumoUF.n ** (-0.2), 0.001);
+  return Array.from({length: 240}, (_, i) => {
+    const x = dominioUF[0] + i * (dominioUF[1] - dominioUF[0]) / 239;
+    const soma = dadosUF.reduce((s, d) => s + Math.exp(-0.5 * ((x - d.tamanho) / h) ** 2), 0);
+    return {x, densidade: soma / (resumoUF.n * h * Math.sqrt(2 * Math.PI))};
+  });
+}
+```
+
+## Row {height=75%}
+
+```{ojs}
+//| title: "Brasil — clique em uma UF"
+viewof ufSelecionada = {
+  // SVG usa um viewBox fixo e se adapta ao cartão sem recriar a seleção.
+  const painel = document.createElement("div");
+  painel.value = "RS";
+  const instrucoes = document.createElement("p");
+  instrucoes.textContent = "Clique no mapa ou escolha uma UF abaixo.";
+  painel.append(instrucoes);
+  const seletor = document.createElement("select");
+  seletor.className = "form-select";
+  seletor.setAttribute("aria-label", "Unidade federativa");
+  for (const f of [...geoBrasil.features].sort((a, b) => a.properties.name.localeCompare(b.properties.name, "pt-BR"))) {
+    const opcao = document.createElement("option");
+    opcao.value = f.properties.id.slice(2);
+    opcao.textContent = f.properties.name + " (" + opcao.value + ")";
+    seletor.append(opcao);
+  }
+  seletor.value = painel.value;
+  painel.append(seletor);
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 540 460");
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-label", "Mapa dos estados do Brasil");
+  svg.style.cssText = "width:100%;height:auto;max-height:440px;display:block;background:#f5f8fa;margin-top:12px;border-radius:8px";
+  painel.append(svg);
+  const estilo = document.createElementNS(ns, "style");
+  estilo.textContent = ".estado:hover,.estado:focus{stroke:#172c37;stroke-width:2;outline:none}";
+  svg.append(estilo);
+
+  // Projeção Mercator plana em coordenadas SVG, sem fundo de tiles externo.
+  const projetar = ([lon, lat]) => [lon * Math.PI / 180, -Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+  const poligonos = f => f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+  const pontos = geoBrasil.features.flatMap(f => poligonos(f).flat(2)).map(projetar);
+  const x0 = Math.min(...pontos.map(p => p[0])), x1 = Math.max(...pontos.map(p => p[0]));
+  const y0 = Math.min(...pontos.map(p => p[1])), y1 = Math.max(...pontos.map(p => p[1]));
+  const escala = Math.min(500 / (x1 - x0), 420 / (y1 - y0));
+  const tx = (540 - (x1 - x0) * escala) / 2, ty = (460 - (y1 - y0) * escala) / 2;
+  const caminhos = new Map();
+  const escolher = uf => {
+    painel.value = uf;
+    seletor.value = uf;
+    for (const [sigla, caminho] of caminhos) {
+      caminho.setAttribute("fill", sigla === uf ? "#24746B" : "#dce5e9");
+      caminho.setAttribute("aria-pressed", String(sigla === uf));
+    }
+    // OJS recebe a UF e atualiza os cálculos dependentes, sem reconstruir o mapa.
+    painel.dispatchEvent(new Event("input", {bubbles: true}));
+  };
+  for (const f of geoBrasil.features) {
+    const uf = f.properties.id.slice(2);
+    const caminho = document.createElementNS(ns, "path");
+    const segmentos = poligonos(f).flatMap(poligono => poligono.map(anel =>
+      anel.map((p, i) => {
+        const [x, y] = projetar(p);
+        return (i ? "L" : "M") + ((x - x0) * escala + tx).toFixed(2) + "," + ((y - y0) * escala + ty).toFixed(2);
+      }).join(" ") + " Z"
+    ));
+    caminho.setAttribute("d", segmentos.join(" "));
+    caminho.setAttribute("fill-rule", "evenodd");
+    caminho.setAttribute("fill", uf === painel.value ? "#24746B" : "#dce5e9");
+    caminho.setAttribute("stroke", "#ffffff");
+    caminho.setAttribute("stroke-width", "0.8");
+    caminho.setAttribute("class", "estado");
+    caminho.setAttribute("role", "button");
+    caminho.setAttribute("tabindex", "0");
+    caminho.setAttribute("aria-label", f.properties.name + " (" + uf + ")");
+    caminho.setAttribute("aria-pressed", String(uf === painel.value));
+    caminho.style.cursor = "pointer";
+    const titulo = document.createElementNS(ns, "title");
+    titulo.textContent = f.properties.name + " (" + uf + ")";
+    caminho.append(titulo);
+    caminho.addEventListener("click", () => escolher(uf));
+    caminho.addEventListener("keydown", evento => {
+      if (evento.key === "Enter" || evento.key === " ") {
+        evento.preventDefault();
+        escolher(uf);
+      }
+    });
+    caminhos.set(uf, caminho);
+    svg.append(caminho);
+  }
+  seletor.addEventListener("change", () => escolher(seletor.value));
+  const fonte = document.createElement("small");
+  fonte.textContent = "Mapa fornecido pelo usuário; fonte indicada no GeoJSON: SimpleMaps. Inclui o Distrito Federal.";
+  painel.append(fonte);
+  return painel;
+}
+```
+
+```{ojs}
+//| title: "Densidade da espécie na UF selecionada"
+Plot.plot({
+  title: nomeUF + " (" + ufSelecionada + ") — " + especie,
+  width,
+  height: 430,
+  marginLeft: 65,
+  x: {label: "Tamanho (mm)", domain: dominioUF},
+  y: {label: "Densidade (1/mm)", domain: [0, 0.18], grid: true},
+  marks: [
+    Plot.ruleY([0]),
+    Plot.areaY(curvaUF, {x: "x", y: "densidade", fill: cor, fillOpacity: 0.2}),
+    Plot.lineY(curvaUF, {x: "x", y: "densidade", stroke: cor, strokeWidth: 2.5})
+  ]
+})
+```
+
+## Row {height=25%}
+
+```{ojs}
+//| title: "Resumo da seleção no mapa"
+Inputs.table([{
+  "UF": ufSelecionada,
+  "Estado / DF": nomeUF,
+  "Espécie": especie,
+  "Indivíduos": resumoUF.n,
+  "Média (mm)": resumoUF.media.toFixed(2),
+  "Desvio padrão (mm)": resumoUF.dp.toFixed(2)
+}])
+```
+
+::: {.card}
+**Dados simulados:** 60 indivíduos de cada espécie por UF (3.240 observações).
+As médias variam entre UFs somente para demonstrar a interação.
+O seletor de espécie da barra lateral também controla este gráfico.
+:::
+
 # Dados
 
 ```{ojs}
@@ -121,4 +287,17 @@ não probabilidade: probabilidades correspondem a áreas sob a curva.
 
 Este exemplo baixa toda a tabela ao abrir a página. Ele demonstra filtragem e
 cálculos locais, sem implementar carregamento de dados por espécie.
+:::
+
+::: {.card title="Como a aba Mapa se conecta ao gráfico"}
+O GeoJSON **br.json** contém 27 polígonos com identificadores como **BRRS**.
+A tabela **dados_estados.csv** usa **uf = RS**. O código remove o prefixo BR
+para ligar cada polígono às observações correspondentes.
+
+O mapa é um SVG criado no navegador. O clique altera o valor de **ufSelecionada**
+e emite um evento **input**; OJS recalcula **dadosUF**, **resumoUF** e **curvaUF**.
+O mapa continua montado e somente o destaque muda. O gráfico depende também de **especie**.
+
+O arquivo do mapa foi compactado removendo espaços de formatação, preservando
+as coordenadas e propriedades. Não há chamadas a servidores de mapas para obter tiles.
 :::
