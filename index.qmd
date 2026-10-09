@@ -118,5 +118,6 @@ O GitHub Pages serve essa pasta como um site.
 Para atualizar os resultados, altere o código ou os dados, renderize novamente
 e envie a pasta **docs** atualizada ao GitHub.
 
+
 Alterado
 :::
