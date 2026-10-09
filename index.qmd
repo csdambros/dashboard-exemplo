@@ -1,123 +1,124 @@
 ---
-title: "Biodiversidade em paisagens"
-author: "Exemplo didático • dados simulados"
+title: "Tamanho das espécies"
+author: "Exemplo didático • 500 observações simuladas"
 format:
   dashboard:
     theme: cosmo
 execute:
   echo: false
-  warning: false
-  message: false
 ---
 
-```{r}
-#| label: preparar-dados
-#| include: false
-library(ggplot2)
+```{ojs}
+//| output: false
 
-# A mesma semente produz os mesmos dados a cada renderização.
-set.seed(42)
-dados <- expand.grid(sitio = 1:20, ano = 2018:2025)
-dados$habitat <- ifelse(dados$sitio <= 10, "Floresta", "Fragmento")
-dados$riqueza <- rpois(nrow(dados), lambda =
-  ifelse(dados$habitat == "Floresta", 32, 22) +
-  (dados$ano - 2018) * ifelse(dados$habitat == "Floresta", 0.4, -0.5))
+// O navegador lê a tabela uma única vez quando a página é aberta.
+dados = FileAttachment("dados.csv").csv({typed: true})
+especies = [...new Set(dados.map(d => d.especie))]
 
-# Para usar um CSV, substitua a simulação acima por:
-# dados <- read.csv("dados.csv")
-# Colunas esperadas: sitio, ano, habitat, riqueza.
+// OJS atualiza estes objetos quando o seletor muda.
+filtrados = dados.filter(d => d.especie === especie)
+valores = filtrados.map(d => d.tamanho)
+resumo = {
+  const n = valores.length;
+  const media = valores.reduce((s, x) => s + x, 0) / n;
+  const dp = Math.sqrt(valores.reduce((s, x) => s + (x - media) ** 2, 0) / (n - 1));
+  return {n, media, dp};
+}
 
-media_anual <- aggregate(riqueza ~ ano + habitat, dados, mean)
-media_habitat <- aggregate(riqueza ~ habitat, dados, mean)
-cores <- c("Floresta" = "#24746B", "Fragmento" = "#CC793F")
-theme_set(theme_minimal(base_size = 13))
+// Eixo compartilhado: permite comparar as espécies sem mudar a escala.
+dominio = {
+  const todos = dados.map(d => d.tamanho);
+  const margem = 0.15 * (Math.max(...todos) - Math.min(...todos));
+  return [Math.min(...todos) - margem, Math.max(...todos) + margem];
+}
+
+// Kernel gaussiano; bandwidth pela regra 1.06 * s * n^(-1/5).
+// É uma estimativa dos dados, não uma curva normal ajustada.
+curva = {
+  const h = Math.max(1.06 * resumo.dp * resumo.n ** (-0.2), 0.001);
+  return Array.from({length: 240}, (_, i) => {
+    const x = dominio[0] + i * (dominio[1] - dominio[0]) / 239;
+    const soma = valores.reduce((s, v) => s + Math.exp(-0.5 * ((x - v) / h) ** 2), 0);
+    return {x, densidade: soma / (valores.length * h * Math.sqrt(2 * Math.PI))};
+  });
+}
+cor = especie === "Espécie A" ? "#24746B" : "#C7753C"
 ```
 
-# Visão geral
+# {.sidebar}
 
-## Row {height=20%}
-
-```{r}
-#| content: valuebox
-#| title: "Sítios amostrados"
-#| icon: geo-alt
-#| color: primary
-list(value = length(unique(dados$sitio)))
+```{ojs}
+viewof especie = Inputs.select(especies, {
+  label: "Espécie",
+  value: especies[0]
+})
 ```
 
-```{r}
-#| content: valuebox
-#| title: "Anos de acompanhamento"
-#| icon: calendar3
-#| color: info
-list(value = length(unique(dados$ano)))
+**Simulação**
+
+- Espécie A: normal com média 30 mm e desvio padrão 4 mm.
+- Espécie B: normal com média 45 mm e desvio padrão 6 mm.
+- 250 indivíduos por espécie.
+
+A média e o desvio observados variam em torno dos valores usados na simulação.
+
+Ao mudar a seleção, o navegador filtra os dados, calcula a densidade e atualiza o gráfico.
+
+# Densidade
+
+## Row {height=75%}
+
+```{ojs}
+//| title: "Distribuição do tamanho"
+Plot.plot({
+  width,
+  height: 400,
+  marginLeft: 65,
+  x: {label: "Tamanho (mm)", domain: dominio},
+  y: {label: "Densidade (1/mm)", domain: [0, 0.15], grid: true},
+  marks: [
+    Plot.ruleY([0]),
+    Plot.areaY(curva, {x: "x", y: "densidade", fill: cor, fillOpacity: 0.2}),
+    Plot.lineY(curva, {x: "x", y: "densidade", stroke: cor, strokeWidth: 2.5})
+  ]
+})
 ```
 
-```{r}
-#| content: valuebox
-#| title: "Riqueza média por sítio e ano"
-#| icon: tree
-#| color: success
-list(value = format(round(mean(dados$riqueza), 1), decimal.mark = ","))
+## Row {height=25%}
+
+```{ojs}
+//| title: "Resumo da seleção"
+Inputs.table([{
+  "Espécie": especie,
+  "Indivíduos": resumo.n,
+  "Média (mm)": resumo.media.toFixed(2),
+  "Desvio padrão (mm)": resumo.dp.toFixed(2)
+}])
 ```
 
-## Row {height=65%}
+# Dados
 
-```{r}
-#| title: "Trajetória da riqueza média"
-ggplot(media_anual, aes(ano, riqueza, colour = habitat)) +
-  geom_line(linewidth = 1.1) +
-  geom_point(size = 2.5) +
-  scale_colour_manual(values = cores) +
-  scale_x_continuous(breaks = 2018:2025) +
-  labs(x = "Ano", y = "Riqueza média", colour = "Habitat") +
-  theme(legend.position = "bottom")
+```{ojs}
+//| title: "Observações da espécie selecionada"
+Inputs.table(filtrados, {
+  columns: ["id", "especie", "tamanho"],
+  header: {id: "Indivíduo", especie: "Espécie", tamanho: "Tamanho (mm)"}
+})
 ```
-
-```{r}
-#| title: "Variação entre observações"
-ggplot(dados, aes(habitat, riqueza, fill = habitat)) +
-  geom_boxplot(width = 0.5, alpha = 0.8) +
-  scale_fill_manual(values = cores) +
-  labs(x = NULL, y = "Riqueza por sítio e ano") +
-  theme(legend.position = "none")
-```
-
-## Row {height=15%}
-
-::: {.card}
-**Dados simulados para aprender Quarto.** São 20 sítios acompanhados por oito anos.
-Cada observação representa a riqueza registrada em um sítio em um ano.
-As diferenças entre habitats foram impostas na simulação e não representam evidência empírica.
-:::
 
 # Como funciona
 
-## Row
+::: {.card title="Do arquivo ao gráfico"}
+**dados.csv** contém as 500 observações. **FileAttachment** lê esse arquivo no navegador.
+**Inputs.select** cria o seletor. O objeto **filtrados** depende da espécie escolhida.
+A curva usa somente os 250 tamanhos selecionados.
 
-::: {.card title="1. O arquivo fonte"}
-O arquivo **index.qmd** reúne configurações, texto e código em R.
-O cabeçalho YAML define título e formato. Os blocos de código preparam os dados
-e criam os gráficos. O código é executado durante a renderização.
+OJS rastreia essas dependências: quando a seleção muda, recalcula o resumo e a curva
+e redesenha o gráfico. Não há consulta a um servidor R nem renderização do Quarto nesse momento.
 
-Abra o arquivo no RStudio para consultar os comentários e modificar o exemplo.
-:::
+A densidade é estimada com kernel gaussiano. A altura da curva é densidade,
+não probabilidade: probabilidades correspondem a áreas sob a curva.
 
-::: {.card title="2. A organização da página"}
-Um título com **#** cria uma página, como “Visão geral” e “Como funciona”.
-Um título com **## Row** cria uma linha. Gráficos nessa linha aparecem lado a lado.
-O atributo **height** controla a proporção da altura.
-
-Os blocos com **content: valuebox** criam os indicadores no topo.
-:::
-
-::: {.card title="3. O resultado publicado"}
-O comando **quarto render** executa o R e gera **docs/index.html** e seus recursos.
-O GitHub Pages serve essa pasta como um site.
-
-Para atualizar os resultados, altere o código ou os dados, renderize novamente
-e envie a pasta **docs** atualizada ao GitHub.
-
-
-Alterado!!!
+Este exemplo baixa toda a tabela ao abrir a página. Ele demonstra filtragem e
+cálculos locais, sem implementar carregamento de dados por espécie.
 :::
